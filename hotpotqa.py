@@ -26,9 +26,11 @@ def llm(prompt, stop=["\n"], max_retries=10):
     base_wait = 5
     for attempt in range(max_retries):
         try:
-            response = openai.Completion.create(
-                model="gpt-3.5-turbo-instruct",
-                prompt=prompt,
+            response = openai.ChatCompletion.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
                 temperature=0,
                 max_tokens=100,
                 top_p=1,
@@ -36,7 +38,7 @@ def llm(prompt, stop=["\n"], max_retries=10):
                 presence_penalty=0.0,
                 stop=stop
             )
-            return response["choices"][0]["text"]
+            return response["choices"][0]["message"]["content"]
         except (openai.error.RateLimitError, openai.error.APIError, openai.error.Timeout) as e:
             if attempt < max_retries - 1:
                 wait_time = base_wait * (2 ** attempt)  # Exponential backoff: 5, 10, 20, 40...
@@ -165,13 +167,19 @@ def main():
     rs = []
     infos = []
     old_time = time.time()
-    for i in idxs[:500]:
+    num_sample = 2
+    for i in idxs[:num_sample]:
         r, info = webthink(i, to_print=True)
         rs.append(info['em'])
         infos.append(info)
-        print(sum(rs), len(rs), sum(rs) / len(rs), (time.time() - old_time) / len(rs))
-        print('-----------')
-        print()
+        accuracy = sum(rs) / len(rs)
+        avg_time = (time.time() - old_time) / len(rs)
+        print(f"=" * 60)
+        print(f"Progress: {len(rs)}/{num_sample} questions completed")
+        print(f"Correct Answers: {sum(rs)}")
+        print(f"Accuracy: {accuracy:.2%}")
+        print(f"Average Time per Question: {avg_time:.2f} seconds")
+        print(f"=" * 60)
 
 if __name__ == "__main__":
     main()
