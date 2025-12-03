@@ -23,29 +23,20 @@ def llm(prompt, stop=["\n"]):
 '''
 
 def llm(prompt, stop=["\n"], max_retries=10):
-    base_wait = 5
+    """Use completion API instead of chat - closer to original paper"""
     for attempt in range(max_retries):
         try:
-            response = openai.ChatCompletion.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
+            response = openai.Completion.create(
+                model="gpt-3.5-turbo-instruct",  # Completion model!
+                prompt=prompt,
                 temperature=0,
                 max_tokens=100,
-                top_p=1,
-                frequency_penalty=0.0,
-                presence_penalty=0.0,
                 stop=stop
             )
-            return response["choices"][0]["message"]["content"]
-        except (openai.error.RateLimitError, openai.error.APIError, openai.error.Timeout) as e:
-            if attempt < max_retries - 1:
-                wait_time = base_wait * (2 ** attempt)  # Exponential backoff: 5, 10, 20, 40...
-                print(f"Error (attempt {attempt+1}/{max_retries}): {type(e).__name__}, waiting {wait_time}s...")
-                time.sleep(wait_time)
-            else:
-                print(f"Failed after {max_retries} attempts: {e}")
+            return response["choices"][0]["text"]
+        except Exception as e:
+            time.sleep(5 * (2 ** attempt))
+            if attempt == max_retries - 1:
                 raise e
 
 import wikienv, wrappers
