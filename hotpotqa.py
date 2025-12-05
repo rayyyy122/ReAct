@@ -1,5 +1,6 @@
 # Set Up
 import os
+import re
 import openai
 import random
 import time
@@ -74,80 +75,75 @@ def webthink(idx=None, prompt=webthink_prompt, to_print=True):
     question = env.reset(idx=idx)
     if to_print:
         print(idx, question)
+    
     prompt += question + "\n"
+    
     n_calls, n_badcalls = 0, 0
     for i in range(1, 8):
         n_calls += 1
-        thought_action = llm(prompt + f"Thought {i}:", stop=[f"\nObservation {i}:"])
+        
+        # 1. STOP SEQUENCES: 
+        # Removed generic "\nObservation" because it cuts off thoughts like 
+        # "My observation is that..."
+        stop_sequences = [
+            f"\nObservation {i}:", 
+            f"\nObservation {i}",
+            f"\nObservation:"
+        ]
+        
+        # 2. PROMPT FIX: 
+        # Removed the extra "\n" before Thought. 
+        # The previous loop adds a newline, so we append directly.
+        thought_action = llm(prompt + f"Thought {i}:", stop=stop_sequences)
+
         try:
-            thought, action = thought_action.strip().split(f"\nAction {i}: ")
-        except:
-            print('ohh...', thought_action)
+            # 3. ROBUST REGEX (Improved):
+            # This regex allows for "Action 1:", "Action1:", or even just "Action:" 
+            # (making the number optional via (\d+)?).
+            pattern = re.compile(f"\\s*Action\\s*(\d+)?\\s*:\\s*", re.IGNORECASE)
+            
+            # split() will return the text before the pattern (Thought) 
+            # and the text after (Action content).
+            parts = pattern.split(thought_action.strip())
+            
+            # We expect [Thought, (optional number), Action string]
+            # Because of the capturing group (\d+)?, split might return 3 elements.
+            # We filter out None/Empty parts to get just Thought and Action.
+            parts = [p for p in parts if p and p.strip() != str(i)]
+            
+            if len(parts) >= 2:
+                thought = parts[0]
+                action = parts[-1] # The last part is the action content
+            else:
+                raise ValueError("Format error")
+
+        except Exception as e:
+            # DEBUG PRINT: Uncomment this to see exactly how it's failing
+            # print(f"DEBUG: Failed parse on: '{thought_action}' -> Error: {e}")
+            
             n_badcalls += 1
             n_calls += 1
             thought = thought_action.strip().split('\n')[0]
-            action = llm(prompt + f"Thought {i}: {thought}\nAction {i}:", stop=[f"\n"]).strip()
+            # Fallback: Force the model to generate just the action line
+            action = llm(prompt + f"Thought {i}: {thought}\nAction {i}:", stop=["\n"]).strip()
+        
         obs, r, done, info = step(env, action[0].lower() + action[1:])
         obs = obs.replace('\\n', '')
+        
         step_str = f"Thought {i}: {thought}\nAction {i}: {action}\nObservation {i}: {obs}\n"
         prompt += step_str
+        
         if to_print:
             print(step_str)
         if done:
             break
+            
     if not done:
         obs, r, done, info = step(env, "finish[]")
+    
     if to_print:
         print(info, '\n')
-    info.update({'n_calls': n_calls, 'n_badcalls': n_badcalls, 'traj': prompt})
-    return r, info
-
-    import json
-import sys
-
-folder = './prompts/'
-prompt_file = 'prompts_naive.json'
-with open(folder + prompt_file, 'r') as f:
-    prompt_dict = json.load(f)
-
-webthink_examples = prompt_dict['webthink_simple6']
-instruction = """Solve a question answering task with interleaving Thought, Action, Observation steps. Thought can reason about the current situation, and Action can be three types: 
-(1) Search[entity], which searches the exact entity on Wikipedia and returns the first paragraph if it exists. If not, it will return some similar entities to search.
-(2) Lookup[keyword], which returns the next sentence containing keyword in the current passage.
-(3) Finish[answer], which returns the answer and finishes the task.
-Here are some examples.
-"""
-webthink_prompt = instruction + webthink_examples
-
-def webthink(idx=None, prompt=webthink_prompt, to_print=True):
-    question = env.reset(idx=idx)
-    if to_print:
-        print(idx, question)
-    prompt += question + "\n"
-    n_calls, n_badcalls = 0, 0
-    for i in range(1, 8):
-        n_calls += 1
-        thought_action = llm(prompt + f"Thought {i}:", stop=[f"\nObservation {i}:"])
-        try:
-            thought, action = thought_action.strip().split(f"\nAction {i}: ")
-        except:
-            print('ohh...', thought_action)
-            n_badcalls += 1
-            n_calls += 1
-            thought = thought_action.strip().split('\n')[0]
-            action = llm(prompt + f"Thought {i}: {thought}\nAction {i}:", stop=[f"\n"]).strip()
-        obs, r, done, info = step(env, action[0].lower() + action[1:])
-        obs = obs.replace('\\n', '')
-        step_str = f"Thought {i}: {thought}\nAction {i}: {action}\nObservation {i}: {obs}\n"
-        prompt += step_str
-        if to_print:
-            print(step_str)
-        if done:
-            break
-    if not done:
-        obs, r, done, info = step(env, "finish[]")
-    if to_print:
-        print(info, '\n')
+        
     info.update({'n_calls': n_calls, 'n_badcalls': n_badcalls, 'traj': prompt})
     return r, info
 
@@ -158,7 +154,7 @@ def main():
     rs = []
     infos = []
     old_time = time.time()
-    num_sample = 2
+    num_sample = 50
     for i in idxs[:num_sample]:
         r, info = webthink(i, to_print=True)
         rs.append(info['em'])
